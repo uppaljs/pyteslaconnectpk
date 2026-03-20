@@ -1,0 +1,22 @@
+name: Feature Request
+description: Suggest a new feature or API endpoint
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **For Home Assistant integration feature requests, please use [tesla-pakistan-hacs](https://github.com/uppaljs/tesla-pakistan-hacs/issues) instead.**
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: A clear description of the feature you'd like.
+    validations:
+      required: true
+  - type: textarea
+    id: usecase
+    attributes:
+      label: Use case
+      description: What problem does this solve?
+    validations:
+      required: true

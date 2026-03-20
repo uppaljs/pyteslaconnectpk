@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Home Assistant Integration Issue
+    url: https://github.com/uppaljs/tesla-pakistan-hacs/issues
+    about: For issues with the Home Assistant integration, please open an issue on the tesla-pakistan-hacs repository.
+  - name: Home Assistant Core Issue
+    url: https://github.com/home-assistant/core/issues
+    about: For issues with Home Assistant Core itself.
