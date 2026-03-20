@@ -63,9 +63,7 @@ class TeslaConnectApi:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _post(
-        self, path: str, payload: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
+    def _post(self, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         """Send a JSON POST request and return the parsed response body.
 
         Args:
@@ -150,9 +148,7 @@ class TeslaConnectApi:
         self.devices = data.get("devices", [])
         self.phone = data.get("phone")
         self.user_name = data.get("name")
-        _LOGGER.info(
-            "Signed in as %s with %d device(s)", self.user_name, len(self.devices)
-        )
+        _LOGGER.info("Signed in as %s with %d device(s)", self.user_name, len(self.devices))
         return data
 
     def change_password(self, new_password: str) -> dict[str, Any]:
@@ -261,9 +257,7 @@ class TeslaConnectApi:
             {"boost": 1 if enabled else 0, "device_id": device_id, "token": self.token},
         )
 
-    def set_geyser_mode(
-        self, device_id: str, curr_mode: int, user_mode: int
-    ) -> dict[str, Any]:
+    def set_geyser_mode(self, device_id: str, curr_mode: int, user_mode: int) -> dict[str, Any]:
         """Set the operating mode on a geyser.
 
         Args:
@@ -286,9 +280,7 @@ class TeslaConnectApi:
             },
         )
 
-    def set_geyser_temp_limit(
-        self, device_id: str, temp_limit: int
-    ) -> dict[str, Any]:
+    def set_geyser_temp_limit(self, device_id: str, temp_limit: int) -> dict[str, Any]:
         """Set the upper temperature limit on a geyser.
 
         Args:
@@ -305,9 +297,7 @@ class TeslaConnectApi:
             {"device_id": device_id, "temp_limit": temp_limit, "token": self.token},
         )
 
-    def set_geyser_timer(
-        self, device_id: str, times: list[dict[str, Any]]
-    ) -> dict[str, Any]:
+    def set_geyser_timer(self, device_id: str, times: list[dict[str, Any]]) -> dict[str, Any]:
         """Configure scheduled timer slots on a geyser.
 
         Args:
@@ -324,9 +314,7 @@ class TeslaConnectApi:
             {"device_id": device_id, "times": times, "token": self.token},
         )
 
-    def set_geyser_two_hour_mode(
-        self, device_id: str, enabled: bool
-    ) -> dict[str, Any]:
+    def set_geyser_two_hour_mode(self, device_id: str, enabled: bool) -> dict[str, Any]:
         """Enable or disable two-hour heating mode on a geyser.
 
         Args:
@@ -347,9 +335,7 @@ class TeslaConnectApi:
             },
         )
 
-    def set_geyser_vacation_mode(
-        self, device_id: str, enabled: bool
-    ) -> dict[str, Any]:
+    def set_geyser_vacation_mode(self, device_id: str, enabled: bool) -> dict[str, Any]:
         """Enable or disable vacation mode on a geyser.
 
         Args:
