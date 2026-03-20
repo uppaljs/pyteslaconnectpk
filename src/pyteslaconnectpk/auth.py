@@ -3,6 +3,10 @@
 Responsible for making authenticated HTTP requests.  Unaware of the
 specific resources or data being requested — that responsibility
 belongs to the data model and API root classes.
+
+Uses ``aiohttp`` for async HTTP.  The caller can inject a shared
+``ClientSession`` (recommended for Home Assistant) or let the class
+create its own.
 """
 
 from __future__ import annotations
@@ -12,7 +16,7 @@ import logging
 import time
 from typing import Any
 
-import requests
+import aiohttp
 
 from .const import API_AUTH_KEY, BASE_URL, OKHTTP_UA, TOKEN_MAX_AGE
 from .exceptions import TeslaConnectApiError, TeslaConnectAuthError
@@ -30,7 +34,8 @@ class Auth:
         host: API base URL.
         phone: Account phone number.
         password: Account password.
-        session: Optional pre-configured requests.Session.
+        websession: Optional pre-configured aiohttp.ClientSession.
+            When provided, the caller owns the session lifecycle.
         timeout: HTTP request timeout in seconds.
 
     """
@@ -41,29 +46,17 @@ class Auth:
         phone: str = "",
         password: str = "",
         *,
-        session: requests.Session | None = None,
+        websession: aiohttp.ClientSession | None = None,
         timeout: int = 30,
     ) -> None:
         self._host = host.rstrip("/") + "/"
         self._phone = phone
         self._password = password
-        self._timeout = timeout
+        self._timeout = aiohttp.ClientTimeout(total=timeout)
         self._token: str | None = None
         self._token_ts: float = 0.0
-        self._session = session or self._create_session()
-
-    @staticmethod
-    def _create_session() -> requests.Session:
-        """Create a session with OkHttp-compatible default headers."""
-        session = requests.Session()
-        session.headers.update(
-            {
-                "Accept-Encoding": "gzip",
-                "Connection": "keep-alive",
-                "User-Agent": OKHTTP_UA,
-            }
-        )
-        return session
+        self._websession = websession
+        self._owns_session = websession is None
 
     @property
     def token(self) -> str | None:
@@ -77,16 +70,27 @@ class Auth:
             return True
         return (time.time() - self._token_ts) > TOKEN_MAX_AGE
 
-    def request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
-        """Make an authenticated request to the API.
+    def _get_session(self) -> aiohttp.ClientSession:
+        """Return the active session, creating one if needed."""
+        if self._websession is None or self._websession.closed:
+            self._websession = aiohttp.ClientSession(
+                headers={
+                    "Accept-Encoding": "gzip",
+                    "Connection": "keep-alive",
+                    "User-Agent": OKHTTP_UA,
+                },
+                timeout=self._timeout,
+            )
+            self._owns_session = True
+        return self._websession
 
-        The ``key`` header (timestamp + API key) is added automatically.
-        If a token is available, it is injected into the JSON body.
+    async def request(self, method: str, path: str, **kwargs: Any) -> dict[str, Any]:
+        """Make an authenticated request to the API.
 
         Args:
             method: HTTP method (currently always "post" for this API).
             path: Endpoint path relative to the host.
-            **kwargs: Passed through to requests; ``json`` is the body dict.
+            **kwargs: ``json`` is the body dict.
 
         Returns:
             Parsed JSON response as a dictionary.
@@ -107,40 +111,41 @@ class Auth:
         headers = {
             "Content-Length": str(len(body.encode())),
             "Content-Type": "application/json; charset=utf-8",
+            "User-Agent": OKHTTP_UA,
             "key": ts + API_AUTH_KEY,
         }
 
+        session = self._get_session()
         try:
-            resp = self._session.request(
+            async with session.request(
                 method,
                 url,
                 data=body,
                 headers=headers,
-                timeout=self._timeout,
-            )
-            resp.raise_for_status()
-        except requests.exceptions.ConnectionError as exc:
+            ) as resp:
+                resp.raise_for_status()
+                data: dict[str, Any] = await resp.json(content_type=None)
+        except aiohttp.ClientConnectionError as exc:
             raise TeslaConnectApiError(f"Connection error: {exc}") from exc
-        except requests.exceptions.Timeout as exc:
+        except TimeoutError as exc:
             raise TeslaConnectApiError(f"Request timed out: {exc}") from exc
-        except requests.exceptions.HTTPError as exc:
-            raise TeslaConnectApiError(f"HTTP {resp.status_code}") from exc
+        except aiohttp.ClientResponseError as exc:
+            raise TeslaConnectApiError(f"HTTP {exc.status}") from exc
 
-        data: dict[str, Any] = resp.json()
         _LOGGER.debug("POST %s status=%s", path, data.get("status", "?"))
         return data
 
-    def sign_in(self) -> dict[str, Any]:
+    async def sign_in(self) -> dict[str, Any]:
         """Authenticate and cache the session token.
 
         Returns:
-            The full sign-in response dict (status, name, phone, token, devices).
+            The full sign-in response dict.
 
         Raises:
             TeslaConnectAuthError: When the API returns a non-success status.
 
         """
-        data = self.request(
+        data = await self.request(
             "post",
             "sign-in",
             json={
@@ -156,11 +161,12 @@ class Auth:
         _LOGGER.info("Signed in as %s", data.get("name"))
         return data
 
-    def ensure_token(self) -> None:
+    async def ensure_token(self) -> None:
         """Re-authenticate if the cached token is missing or stale."""
         if self.token_expired:
-            self.sign_in()
+            await self.sign_in()
 
-    def close(self) -> None:
-        """Close the underlying HTTP session."""
-        self._session.close()
+    async def close(self) -> None:
+        """Close the session if we own it."""
+        if self._owns_session and self._websession and not self._websession.closed:
+            await self._websession.close()

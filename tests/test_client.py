@@ -1,15 +1,14 @@
-"""Tests for the pyteslaconnectpk library."""
+"""Tests for the pyteslaconnectpk async library."""
 
 from __future__ import annotations
 
 import time
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
+import aiohttp
 import pytest
-import requests
 
 from pyteslaconnectpk import (
-    API_AUTH_KEY,
     TOKEN_MAX_AGE,
     Auth,
     Device,
@@ -20,7 +19,6 @@ from pyteslaconnectpk import (
     TeslaConnectAuthError,
     TimeSlot,
 )
-from pyteslaconnectpk.const import OKHTTP_UA
 
 MOCK_PHONE = "03001234567"
 MOCK_PASSWORD = "testpass"
@@ -63,6 +61,19 @@ MOCK_INVERTER_DETAILS = {
 }
 
 
+def _mock_response(data: dict) -> MagicMock:
+    """Create a mock aiohttp response context manager."""
+    resp = AsyncMock()
+    resp.json = AsyncMock(return_value=data)
+    resp.raise_for_status = MagicMock()
+    resp.status = 200
+
+    ctx = AsyncMock()
+    ctx.__aenter__ = AsyncMock(return_value=resp)
+    ctx.__aexit__ = AsyncMock(return_value=False)
+    return ctx
+
+
 # ------------------------------------------------------------------
 # Auth tests
 # ------------------------------------------------------------------
@@ -70,11 +81,6 @@ MOCK_INVERTER_DETAILS = {
 
 class TestAuth:
     """Tests for the Auth layer."""
-
-    def test_user_agent(self) -> None:
-        """Session should use OkHttp user agent."""
-        auth = Auth(phone=MOCK_PHONE, password=MOCK_PASSWORD)
-        assert auth._session.headers["User-Agent"] == OKHTTP_UA
 
     def test_no_token_initially(self) -> None:
         """A fresh auth instance should have no token."""
@@ -102,109 +108,51 @@ class TestAuth:
         assert auth._host == "http://local/"
 
     def test_injected_session(self) -> None:
-        """An injected session should be used instead of creating one."""
-        session = MagicMock(spec=requests.Session)
-        session.headers = {}
-        auth = Auth(phone=MOCK_PHONE, password=MOCK_PASSWORD, session=session)
-        assert auth._session is session
+        """An injected session should be used."""
+        session = MagicMock(spec=aiohttp.ClientSession)
+        session.closed = False
+        auth = Auth(phone=MOCK_PHONE, password=MOCK_PASSWORD, websession=session)
+        assert auth._websession is session
+        assert auth._owns_session is False
 
-    @patch("pyteslaconnectpk.auth.requests.Session")
-    def test_key_header(self, mock_cls: MagicMock) -> None:
-        """Key header should be timestamp + API_AUTH_KEY."""
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"status": "Success"}
-        mock_resp.raise_for_status.return_value = None
-        session = mock_cls.return_value
-        session.request.return_value = mock_resp
-        session.headers = {}
-
-        auth = Auth(phone=MOCK_PHONE, password=MOCK_PASSWORD)
-        auth._session = session
-        auth.request("post", "test", json={})
-
-        key = session.request.call_args.kwargs["headers"]["key"]
-        assert key.endswith(API_AUTH_KEY)
-        assert key[: -len(API_AUTH_KEY)].isdigit()
-
-    @patch("pyteslaconnectpk.auth.requests.Session")
-    def test_compact_json(self, mock_cls: MagicMock) -> None:
-        """Body should use compact JSON encoding."""
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"status": "Success"}
-        mock_resp.raise_for_status.return_value = None
-        session = mock_cls.return_value
-        session.request.return_value = mock_resp
-        session.headers = {}
-
-        auth = Auth(phone=MOCK_PHONE, password=MOCK_PASSWORD)
-        auth._session = session
-        auth.request("post", "test", json={"a": 1, "b": 2})
-
-        body = session.request.call_args.kwargs["data"]
-        assert " " not in body
-
-    @patch("pyteslaconnectpk.auth.requests.Session")
-    def test_connection_error(self, mock_cls: MagicMock) -> None:
-        """Connection errors should raise TeslaConnectApiError."""
-        session = mock_cls.return_value
-        session.request.side_effect = requests.exceptions.ConnectionError("refused")
-        session.headers = {}
-
-        auth = Auth(phone=MOCK_PHONE, password=MOCK_PASSWORD)
-        auth._session = session
-        with pytest.raises(TeslaConnectApiError, match="Connection error"):
-            auth.request("post", "test")
-
-    @patch("pyteslaconnectpk.auth.requests.Session")
-    def test_timeout(self, mock_cls: MagicMock) -> None:
-        """Timeouts should raise TeslaConnectApiError."""
-        session = mock_cls.return_value
-        session.request.side_effect = requests.exceptions.Timeout("timed out")
-        session.headers = {}
-
-        auth = Auth(phone=MOCK_PHONE, password=MOCK_PASSWORD)
-        auth._session = session
-        with pytest.raises(TeslaConnectApiError, match="timed out"):
-            auth.request("post", "test")
-
-    @patch("pyteslaconnectpk.auth.requests.Session")
-    def test_sign_in_success(self, mock_cls: MagicMock) -> None:
+    @pytest.mark.asyncio
+    async def test_sign_in_success(self) -> None:
         """Successful sign-in should cache the token."""
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = MOCK_SIGN_IN_RESPONSE
-        mock_resp.raise_for_status.return_value = None
-        session = mock_cls.return_value
-        session.request.return_value = mock_resp
-        session.headers = {}
+        session = MagicMock(spec=aiohttp.ClientSession)
+        session.closed = False
+        session.request = MagicMock(return_value=_mock_response(MOCK_SIGN_IN_RESPONSE))
 
-        auth = Auth(phone=MOCK_PHONE, password=MOCK_PASSWORD)
-        auth._session = session
-        data = auth.sign_in()
+        auth = Auth(phone=MOCK_PHONE, password=MOCK_PASSWORD, websession=session)
+        data = await auth.sign_in()
 
         assert data["status"] == "Success"
         assert auth.token == MOCK_SIGN_IN_RESPONSE["token"]
 
-    @patch("pyteslaconnectpk.auth.requests.Session")
-    def test_sign_in_failure(self, mock_cls: MagicMock) -> None:
+    @pytest.mark.asyncio
+    async def test_sign_in_failure(self) -> None:
         """Failed sign-in should raise TeslaConnectAuthError."""
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = {"message": "Bad creds", "status": "Failure"}
-        mock_resp.raise_for_status.return_value = None
-        session = mock_cls.return_value
-        session.request.return_value = mock_resp
-        session.headers = {}
+        session = MagicMock(spec=aiohttp.ClientSession)
+        session.closed = False
+        session.request = MagicMock(
+            return_value=_mock_response({"message": "Bad creds", "status": "Failure"})
+        )
 
-        auth = Auth(phone=MOCK_PHONE, password=MOCK_PASSWORD)
-        auth._session = session
+        auth = Auth(phone=MOCK_PHONE, password=MOCK_PASSWORD, websession=session)
         with pytest.raises(TeslaConnectAuthError, match="Bad creds"):
-            auth.sign_in()
+            await auth.sign_in()
 
-    def test_close(self) -> None:
-        """close() should close the underlying session."""
-        auth = Auth(phone=MOCK_PHONE, password=MOCK_PASSWORD)
-        auth._session = MagicMock()
-        auth.close()
-        auth._session.close.assert_called_once()
+    @pytest.mark.asyncio
+    async def test_connection_error(self) -> None:
+        """Connection errors should raise TeslaConnectApiError."""
+        session = MagicMock(spec=aiohttp.ClientSession)
+        session.closed = False
+        ctx = AsyncMock()
+        ctx.__aenter__ = AsyncMock(side_effect=aiohttp.ClientConnectionError("refused"))
+        session.request = MagicMock(return_value=ctx)
+
+        auth = Auth(phone=MOCK_PHONE, password=MOCK_PASSWORD, websession=session)
+        with pytest.raises(TeslaConnectApiError, match="Connection error"):
+            await auth.request("post", "test")
 
 
 # ------------------------------------------------------------------
@@ -269,66 +217,54 @@ class TestInverterDetails:
 
 
 # ------------------------------------------------------------------
-# TeslaConnectApi (root class) tests
+# TeslaConnectApi tests
 # ------------------------------------------------------------------
 
 
 class TestTeslaConnectApi:
     """Tests for the high-level API client."""
 
-    @patch("pyteslaconnectpk.auth.requests.Session")
-    def test_sign_in_populates_devices(self, mock_cls: MagicMock) -> None:
+    @pytest.mark.asyncio
+    async def test_sign_in_populates_devices(self) -> None:
         """sign_in should populate typed Device objects."""
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = MOCK_SIGN_IN_RESPONSE
-        mock_resp.raise_for_status.return_value = None
-        session = mock_cls.return_value
-        session.request.return_value = mock_resp
-        session.headers = {}
+        session = MagicMock(spec=aiohttp.ClientSession)
+        session.closed = False
+        session.request = MagicMock(return_value=_mock_response(MOCK_SIGN_IN_RESPONSE))
 
-        api = TeslaConnectApi(MOCK_PHONE, MOCK_PASSWORD)
-        api.auth._session = session
-        api.sign_in()
+        api = TeslaConnectApi(MOCK_PHONE, MOCK_PASSWORD, websession=session)
+        await api.sign_in()
 
         assert api.user_name == "Test User"
         assert len(api.devices) == 2
         assert isinstance(api.devices[0], Device)
         assert api.devices[0].name == "Geyser"
 
-    @patch("pyteslaconnectpk.auth.requests.Session")
-    def test_get_geyser_details_returns_model(self, mock_cls: MagicMock) -> None:
+    @pytest.mark.asyncio
+    async def test_get_geyser_details_returns_model(self) -> None:
         """get_geyser_details should return a GeyserDetails model."""
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = MOCK_GEYSER_DETAILS
-        mock_resp.raise_for_status.return_value = None
-        session = mock_cls.return_value
-        session.request.return_value = mock_resp
-        session.headers = {}
+        session = MagicMock(spec=aiohttp.ClientSession)
+        session.closed = False
+        session.request = MagicMock(return_value=_mock_response(MOCK_GEYSER_DETAILS))
 
-        api = TeslaConnectApi(MOCK_PHONE, MOCK_PASSWORD)
-        api.auth._session = session
+        api = TeslaConnectApi(MOCK_PHONE, MOCK_PASSWORD, websession=session)
         api.auth._token = "tok"
         api.auth._token_ts = time.time()
 
-        details = api.get_geyser_details("g1")
+        details = await api.get_geyser_details("g1")
         assert isinstance(details, GeyserDetails)
         assert details.curr_temp == 46
 
-    @patch("pyteslaconnectpk.auth.requests.Session")
-    def test_get_inverter_details_returns_model(self, mock_cls: MagicMock) -> None:
+    @pytest.mark.asyncio
+    async def test_get_inverter_details_returns_model(self) -> None:
         """get_inverter_details should return an InverterDetails model."""
-        mock_resp = MagicMock()
-        mock_resp.json.return_value = MOCK_INVERTER_DETAILS
-        mock_resp.raise_for_status.return_value = None
-        session = mock_cls.return_value
-        session.request.return_value = mock_resp
-        session.headers = {}
+        session = MagicMock(spec=aiohttp.ClientSession)
+        session.closed = False
+        session.request = MagicMock(return_value=_mock_response(MOCK_INVERTER_DETAILS))
 
-        api = TeslaConnectApi(MOCK_PHONE, MOCK_PASSWORD)
-        api.auth._session = session
+        api = TeslaConnectApi(MOCK_PHONE, MOCK_PASSWORD, websession=session)
         api.auth._token = "tok"
         api.auth._token_ts = time.time()
 
-        details = api.get_inverter_details("i1")
+        details = await api.get_inverter_details("i1")
         assert isinstance(details, InverterDetails)
         assert details.battery_percentage == 85

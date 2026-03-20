@@ -168,20 +168,20 @@ class GeyserDetails:
 
     # -- Commands --
 
-    def set_boost(self, enabled: bool) -> None:
+    async def set_boost(self, enabled: bool) -> None:
         """Enable or disable boost mode."""
-        self.auth.ensure_token()
-        data = self.auth.request(
+        await self.auth.ensure_token()
+        data = await self.auth.request(
             "post",
             "geyser-boost",
             json={"boost": 1 if enabled else 0, "device_id": self.device_id},
         )
         self.raw_data.update(data)
 
-    def set_mode(self, curr_mode: int, user_mode: int) -> None:
+    async def set_mode(self, curr_mode: int, user_mode: int) -> None:
         """Set the operating mode."""
-        self.auth.ensure_token()
-        data = self.auth.request(
+        await self.auth.ensure_token()
+        data = await self.auth.request(
             "post",
             "geyser-mode",
             json={
@@ -192,40 +192,40 @@ class GeyserDetails:
         )
         self.raw_data.update(data)
 
-    def set_temp_limit(self, temp_limit: int) -> None:
+    async def set_temp_limit(self, temp_limit: int) -> None:
         """Set the target temperature limit."""
-        self.auth.ensure_token()
-        data = self.auth.request(
+        await self.auth.ensure_token()
+        data = await self.auth.request(
             "post",
             "geyser-temp-limit",
             json={"device_id": self.device_id, "temp_limit": temp_limit},
         )
         self.raw_data.update(data)
 
-    def set_timer(self, times: list[dict[str, Any]]) -> None:
+    async def set_timer(self, times: list[dict[str, Any]]) -> None:
         """Set the hourly timer schedule."""
-        self.auth.ensure_token()
-        data = self.auth.request(
+        await self.auth.ensure_token()
+        data = await self.auth.request(
             "post",
             "geyser-time",
             json={"device_id": self.device_id, "times": times},
         )
         self.raw_data.update(data)
 
-    def set_two_hour_mode(self, enabled: bool) -> None:
+    async def set_two_hour_mode(self, enabled: bool) -> None:
         """Enable or disable two-hour mode."""
-        self.auth.ensure_token()
-        data = self.auth.request(
+        await self.auth.ensure_token()
+        data = await self.auth.request(
             "post",
             "geyser-two-hour-mode",
             json={"device_id": self.device_id, "two_hour_mode": 1 if enabled else 0},
         )
         self.raw_data.update(data)
 
-    def set_vacation_mode(self, enabled: bool) -> None:
+    async def set_vacation_mode(self, enabled: bool) -> None:
         """Enable or disable vacation mode."""
-        self.auth.ensure_token()
-        data = self.auth.request(
+        await self.auth.ensure_token()
+        data = await self.auth.request(
             "post",
             "geyser-vacation-mode",
             json={"device_id": self.device_id, "vacation": 1 if enabled else 0},
